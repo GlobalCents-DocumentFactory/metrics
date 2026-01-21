@@ -1,0 +1,42 @@
+# PTFD8 Alerting Rules
+# Focused on PTFDService.exe Windows service
+
+groups:
+  - name: ptfd.service
+    rules:
+      # PTFD Service Health
+      - alert: PTFDServiceDown
+        expr: up{job="ptfd-service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: ptfd-service
+        annotations:
+          summary: "PTFD Service is down"
+          description: "PTFD main service has been unreachable for more than 1 minute"
+
+  - name: ptfd.performance
+    rules:
+      # Memory Usage
+      - alert: HighMemoryUsage
+        expr: (process_resident_memory_bytes / 1024 / 1024 / 1024) > 4
+        for: 5m
+        labels:
+          severity: warning
+          service: ptfd-service
+        annotations:
+          summary: "High memory usage"
+          description: "PTFDService is using {{ $value }}GB of memory"
+
+  - name: ptfd.errors
+    rules:
+      # Error Rate Alerts
+      - alert: HighErrorRate
+        expr: rate(ptfd_processing_errors_total[5m]) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+          service: ptfd-service
+        annotations:
+          summary: "High error rate"
+          description: "Error rate is {{ $value }} errors per second"

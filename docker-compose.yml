@@ -1,0 +1,200 @@
+name: ptfd8-observability
+
+services:
+  # Jaeger - Distributed tracing with OTLP support
+  jaeger:
+    image: jaegertracing/all-in-one:1.49
+    container_name: ptfd8-jaeger
+    environment:
+      # OTLP receiver configuration
+      - COLLECTOR_OTLP_ENABLED=true
+      - COLLECTOR_OTLP_GRPC_HOST_PORT=:4317
+      - COLLECTOR_OTLP_HTTP_HOST_PORT=:4318
+      # Storage configuration
+      - SPAN_STORAGE_TYPE=badger
+      - BADGER_EPHEMERAL=false
+      - BADGER_DIRECTORY_VALUE=/badger/data
+      - BADGER_DIRECTORY_KEY=/badger/key
+      # Query configuration
+      - QUERY_BASE_PATH=/jaeger
+      # Sampling configuration
+      - SAMPLING_STRATEGIES_FILE=/etc/jaeger/sampling_strategies.json
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4317:4317" # OTLP gRPC receiver
+      - "4318:4318" # OTLP HTTP receiver
+      - "14268:14268" # Jaeger collector HTTP
+      - "14250:14250" # Jaeger collector gRPC
+      - "9411:9411" # Zipkin compatible endpoint
+    volumes:
+      - type: bind
+        source: ./data/jaeger/badger
+        target: /badger
+      - type: bind
+        source: ./config/jaeger
+        target: /etc/jaeger
+    networks:
+      - ptfd-observability
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:16686/",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Prometheus - Metrics collection and storage
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: ptfd8-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--storage.tsdb.retention.size=10GB"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--web.enable-lifecycle"
+      - "--web.enable-admin-api"
+      - "--log.level=info"
+      - "--web.external-url=http://localhost:9090/"
+      - "--web.route-prefix=/"
+    ports:
+      - "9090:9090"
+    volumes:
+      - type: bind
+        source: ./config/prometheus/prometheus.yml
+        target: /etc/prometheus/prometheus.yml
+      - type: bind
+        source: ./config/prometheus/rules
+        target: /etc/prometheus/rules
+      - type: bind
+        source: ./data/prometheus
+        target: /prometheus
+    networks:
+      - ptfd-observability
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9090/-/healthy",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Grafana - Visualization and dashboards
+  grafana:
+    image: grafana/grafana:10.1.2
+    container_name: ptfd8-grafana
+    environment:
+      # Security settings for development
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=ptfd123
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      # Server settings
+      - GF_SERVER_HTTP_PORT=3000
+      - GF_SERVER_DOMAIN=localhost
+      - GF_SERVER_ROOT_URL=http://localhost:3000/
+      # Database settings (SQLite for development)
+      - GF_DATABASE_TYPE=sqlite3
+      - GF_DATABASE_PATH=/var/lib/grafana/grafana.db
+      # Provisioning
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      # Plugins
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource,grafana-worldmap-panel,natel-discrete-panel
+      # Feature toggles
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
+    ports:
+      - "3000:3000"
+    volumes:
+      - type: bind
+        source: ./config/grafana/provisioning
+        target: /etc/grafana/provisioning
+      - type: bind
+        source: ./config/grafana/dashboards
+        target: /var/lib/grafana/dashboards
+      - type: bind
+        source: ./data/grafana
+        target: /var/lib/grafana
+    networks:
+      - ptfd-observability
+    depends_on:
+      - prometheus
+      - jaeger
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3000/api/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Loki - Log aggregation system
+  loki:
+    image: grafana/loki:2.9.1
+    container_name: ptfd8-loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - ptfd-observability
+    restart: unless-stopped
+
+  # Promtail - Log collector and shipper
+  promtail:
+    image: grafana/promtail:2.9.1
+    container_name: ptfd8-promtail
+    volumes:
+      - ./config/promtail/promtail.yml:/etc/promtail/config.yml
+      # Mount the host logs directory to the container
+      - E:/docfactorydata/logs:/var/log/ptfd:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - ptfd-observability
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+# Network configuration for container communication
+networks:
+  ptfd-observability:
+    name: ptfd8-observability
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+
+# Volume definitions for data persistence
+volumes:
+  prometheus-data:
+    name: ptfd8-prometheus-data
+    driver: local
+  grafana-data:
+    name: ptfd8-grafana-data
+    driver: local
+  jaeger-data:
+    name: ptfd8-jaeger-data
+    driver: local

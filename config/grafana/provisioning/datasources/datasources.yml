@@ -1,0 +1,88 @@
+apiVersion: 1
+
+# Configuration for Grafana data sources
+# This file configures Prometheus and Jaeger as data sources for PTFD8 observability
+
+datasources:
+  # Prometheus - Primary metrics data source
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    uid: prometheus
+    jsonData:
+      httpMethod: POST
+      manageAlerts: true
+      prometheusType: Prometheus
+      prometheusVersion: 2.40.0
+      cacheLevel: "High"
+      disableRecordingRules: false
+      incrementalQueryOverlapWindow: 10m
+      # Custom headers for authentication if needed
+      # httpHeaderName1: 'X-API-Key'
+    # secureJsonData:
+    #   httpHeaderValue1: 'your-api-key'
+
+  # Jaeger - Distributed tracing data source
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686/jaeger
+    uid: jaeger
+    editable: true
+    jsonData:
+      tracesToLogsV2:
+        # Enable trace to logs correlation
+        datasourceUid: "loki"
+        spanStartTimeShift: "1h"
+        spanEndTimeShift: "-1h"
+        tags: ["job", "instance", "pod", "namespace"]
+        filterByTraceID: false
+        filterBySpanID: false
+        customQuery: true
+        query: '{job="ptfd-service"}'
+      tracesToMetrics:
+        # Enable trace to metrics correlation
+        datasourceUid: "prometheus"
+        spanStartTimeShift: "1h"
+        spanEndTimeShift: "-1h"
+        tags:
+          [
+            { key: "service.name", value: "service" },
+            { key: "job", value: "job" },
+          ]
+        queries:
+          - name: "Sample query"
+            query: "sum(rate(traces_spanmetrics_latency_bucket{$$__tags}[5m]))"
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
+      spanBar:
+        type: "Tag"
+        tag: "http.status_code"
+
+  # Loki - Logs data source (if available)
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    uid: loki
+    editable: true
+    jsonData:
+      maxLines: 1000
+      derivedFields:
+        - datasourceUid: jaeger
+          matcherRegex: "trace_id=(\\w+)"
+          name: TraceID
+          url: "$${__value.raw}"
+          urlDisplayLabel: "View Trace"
+
+  # TestData - For testing dashboard panels
+  - name: TestData DB
+    type: testdata
+    uid: testdata
+    editable: false
+    access: proxy

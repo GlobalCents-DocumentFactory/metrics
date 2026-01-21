@@ -1,0 +1,29 @@
+# Prometheus Configuration for PTFD8 (DocumentFactory)
+# Scrapes metrics strictly from the PTFDService.exe Windows service
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # PTFD Service - Main document processing service (Running as Windows Service)
+  - job_name: "ptfd-service"
+    static_configs:
+      - targets: ["host.docker.internal:5123"]
+    metrics_path: /metrics
+    scheme: http
+
+  # Jaeger - Distributed tracing metrics
+  - job_name: "jaeger"
+    static_configs:
+      - targets: ["jaeger:14269"]
+
+  # Grafana metrics
+  - job_name: "grafana"
+    static_configs:
+      - targets: ["grafana:3000"]
